@@ -1,0 +1,13 @@
+{
+  "name": "pi-ads",
+  "version": "0.1.0",
+  "description": "pi extension for querying NASA's Astrophysics Data System (ADS)",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
+    "@sinclair/typebox": "*"
+  }
+}
