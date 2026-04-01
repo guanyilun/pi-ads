@@ -1,6 +1,6 @@
 {
   "name": "@guanyilun/pi-ads",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "pi extension for querying NASA's Astrophysics Data System (ADS)",
   "keywords": ["pi-package"],
   "license": "MIT",
