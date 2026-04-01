@@ -22,19 +22,13 @@ Add this to your `~/.bashrc`, `~/.zshrc`, or equivalent so it persists across se
 ### 3. Install the package
 
 ```bash
-pi install /path/to/pi-ads
+pi install npm:@guanyilun/pi-ads
 ```
 
-Or install from a git repository:
+Or install from the GitHub repository:
 
 ```bash
-pi install git:github.com/your-username/pi-ads
-```
-
-Or install from npm:
-
-```bash
-pi install npm:pi-ads
+pi install git:github.com/guanyilun/pi-ads
 ```
 
 For a quick one-shot test without installing:

@@ -1,9 +1,14 @@
 {
-  "name": "pi-ads",
+  "name": "@guanyilun/pi-ads",
   "version": "0.1.0",
   "description": "pi extension for querying NASA's Astrophysics Data System (ADS)",
   "keywords": ["pi-package"],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guanyilun/pi-ads.git"
+  },
+  "homepage": "https://github.com/guanyilun/pi-ads",
   "peerDependencies": {
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-coding-agent": "*",
