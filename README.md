@@ -56,6 +56,7 @@ Search the full ADS database with fielded queries, filters, and sorting.
 | `max_results` | number | Max papers to return (default 10, max 50). |
 | `sort_by` | string | Sort order: `relevance` (default), `date`, `citation_count`, `read_count`. |
 | `start` | number | Pagination offset (default 0). |
+| `detail` | string | Output detail level: `compact` (default) or `full`. Compact shows title, first author, year, bibcode, citations — minimal context usage. Full includes abstract, all authors, keywords, DOI. |
 
 **Example prompts:**
 - *"Search ADS for recent papers about fast radio bursts"*
@@ -89,9 +90,10 @@ Find papers that cite a given paper (forward citations) or that a given paper ci
 |---|---|---|
 | `bibcode` | string | **Required.** ADS bibcode of the paper. |
 | `direction` | string | `citations` (papers citing this one — default) or `references` (papers this one cites). |
-| `max_results` | number | Max papers to return (default 20, max 50). |
+| `max_results` | number | Max papers to return (default 10, max 50). |
 | `sort_by` | string | Sort order: `date` (default), `citation_count`, or `read_count`. |
 | `start` | number | Pagination offset (default 0). |
+| `detail` | string | Output detail level: `compact` (default) or `full`. Compact shows title, first author, year, bibcode, citations — minimal context usage. Full includes abstract, all authors, keywords, DOI. |
 
 **Example prompts:**
 - *"Find papers citing 2023ApJ...950L..12A"*

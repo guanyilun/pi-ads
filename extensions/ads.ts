@@ -101,6 +101,16 @@ function formatPaper(p: ADSPaper, index?: number): string {
     return lines.join("\n");
 }
 
+function formatPaperCompact(p: ADSPaper, index?: number): string {
+    const prefix = index !== undefined ? `[${index + 1}] ` : "";
+    const authorStr = p.authors.length > 0
+        ? p.authors.length === 1
+            ? p.authors[0]
+            : `${p.authors[0]} et al.`
+        : "Unknown";
+    return `${prefix}${p.title}\n    ${p.bibcode} | ${authorStr} | ${p.year} | ${p.bibstem || p.pub} | ${p.citationCount} cit`;
+}
+
 function getToken(): string {
     const token = process.env.ADS_API_TOKEN ?? "";
     if (!token) {
@@ -148,11 +158,11 @@ export default function (pi: ExtensionAPI) {
             "Search NASA's Astrophysics Data System (ADS) for astronomy and physics papers. " +
             "Supports fielded queries (title:, author:, abstract:, keyword:, year:, bibcode:, doi:, etc.), " +
             "database filters (astronomy, physics, general), and sorting by relevance, date, or citation count. " +
-            "Returns titles, authors, abstracts, citation counts, and ADS links. " +
+            "Use detail='compact' (default) for concise summaries, or detail='full' to include abstracts, all authors, and keywords. " +
             "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
             "Search NASA ADS for astronomy/physics papers. Supports fielded queries, database filters, and sorting. " +
-            "Returns titles, authors, abstracts, citations, and links.",
+            "Returns compact summaries by default. Use detail='full' for abstracts.",
         parameters: Type.Object({
             query: Type.String({
                 description:
@@ -192,6 +202,11 @@ export default function (pi: ExtensionAPI) {
             start: Type.Optional(
                 Type.Number({ description: "Start index for pagination (default 0)", default: 0 })
             ),
+            detail: Type.Optional(
+                StringEnum(["compact", "full"] as const, {
+                    description: "Output detail level. 'compact' (default): title, first author, year, bibcode, citations — minimal context. 'full': includes abstract, all authors, keywords, DOI.",
+                })
+            ),
         }),
 
         async execute(_toolCallId, params, signal) {
@@ -229,9 +244,17 @@ export default function (pi: ExtensionAPI) {
             }
 
             const papers = docs.map(parseDoc);
+            const detail = params.detail ?? "compact";
+            const formatter = detail === "full" ? formatPaper : formatPaperCompact;
             const header = `Found ${totalResults} papers (showing ${start + 1}-${start + papers.length}):\n`;
-            const body = papers.map((p, i) => formatPaper(p, i)).join("\n\n");
+            const body = papers.map((p, i) => formatter(p, i)).join("\n\n");
             let text = header + body;
+
+            // Pagination hint
+            const nextStart = start + papers.length;
+            if (nextStart < totalResults) {
+                text += `\n\n→ Use start=${nextStart} to see the next page of results.`;
+            }
 
             const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
             text = truncation.content;
@@ -399,9 +422,11 @@ export default function (pi: ExtensionAPI) {
         label: "ADS Citations",
         description:
             "Find papers that cite a given paper (citations) or that a given paper cites (references). " +
-            "Uses ADS bibcode identifiers. Requires ADS_API_TOKEN environment variable.",
+            "Uses ADS bibcode identifiers. " +
+            "Use detail='compact' (default) for concise summaries, or detail='full' to include abstracts, all authors, and keywords. " +
+            "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
-            "Find citing or referenced papers for an ADS bibcode. Returns titles, authors, abstracts, and citation counts.",
+            "Find citing or referenced papers for an ADS bibcode. Returns compact summaries by default. Use detail='full' for abstracts.",
         parameters: Type.Object({
             bibcode: Type.String({
                 description: 'ADS bibcode of the paper, e.g. "2023ApJ...950L..12A".',
@@ -412,7 +437,7 @@ export default function (pi: ExtensionAPI) {
                 })
             ),
             max_results: Type.Optional(
-                Type.Number({ description: "Max papers to return (default 20, max 50)", default: 20 })
+                Type.Number({ description: "Max papers to return (default 10, max 50)", default: 10 })
             ),
             sort_by: Type.Optional(
                 StringEnum(["date", "citation_count", "read_count"] as const, {
@@ -422,11 +447,16 @@ export default function (pi: ExtensionAPI) {
             start: Type.Optional(
                 Type.Number({ description: "Start index for pagination (default 0)", default: 0 })
             ),
+            detail: Type.Optional(
+                StringEnum(["compact", "full"] as const, {
+                    description: "Output detail level. 'compact' (default): title, first author, year, bibcode, citations — minimal context. 'full': includes abstract, all authors, keywords, DOI.",
+                })
+            ),
         }),
 
         async execute(_toolCallId, params, signal) {
             const direction = params.direction ?? "citations";
-            const maxResults = Math.min(params.max_results ?? 20, 50);
+            const maxResults = Math.min(params.max_results ?? 10, 50);
             const start = params.start ?? 0;
             const sortField = params.sort_by ?? "date";
             const sort = buildSortParam(sortField);
@@ -454,11 +484,19 @@ export default function (pi: ExtensionAPI) {
             }
 
             const papers = docs.map(parseDoc);
+            const detail = params.detail ?? "compact";
+            const formatter = detail === "full" ? formatPaper : formatPaperCompact;
             const dirLabel = direction === "citations" ? "citing papers" : "referenced papers";
             const header = `Found ${totalResults} ${dirLabel} (showing ${start + 1}-${start + papers.length}):
 `;
-            const body = papers.map((p, i) => formatPaper(p, i)).join("\n\n");
+            const body = papers.map((p, i) => formatter(p, i)).join("\n\n");
             let text = header + body;
+
+            // Pagination hint
+            const nextStart = start + papers.length;
+            if (nextStart < totalResults) {
+                text += `\n\n→ Use start=${nextStart} to see the next page of results.`;
+            }
 
             const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
             text = truncation.content;
