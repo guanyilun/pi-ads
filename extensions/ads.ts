@@ -140,6 +140,145 @@ async function adsFetch(url: string, signal?: AbortSignal, options?: RequestInit
     return resp.json();
 }
 
+// --- Shared helpers for identifier resolution and PDF download ---
+
+const PDF_SOURCES = {
+    publisher: "PUB_PDF",
+    ads: "ADS_PDF",
+    arxiv: "EPRINT_PDF",
+} as const;
+
+type PDFSource = keyof typeof PDF_SOURCES;
+
+const PDF_UA =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36";
+
+interface ResolvedBibcode {
+    bibcode: string;
+    title: string;
+}
+
+function buildIdQuery(id: string): string {
+    const trimmed = id.trim();
+    if (trimmed.startsWith("10.") || trimmed.startsWith("doi:")) {
+        const doi = trimmed.replace(/^doi:/, "");
+        return `doi:"${doi}"`;
+    } else if (trimmed.toLowerCase().startsWith("arxiv:") || /^\d{4}\.\d{4,5}/.test(trimmed)) {
+        const arxivId = trimmed.replace(/^arxiv:/i, "");
+        return `arxiv:"${arxivId}"`;
+    } else {
+        return `bibcode:${trimmed}`;
+    }
+}
+
+async function resolveBibcode(id: string, signal?: AbortSignal): Promise<ResolvedBibcode> {
+    const query = buildIdQuery(id);
+    const url =
+        `${ADS_SEARCH_API}?q=${encodeURIComponent(query)}` +
+        `&fl=bibcode,title&rows=1`;
+
+    const data = await adsFetch(url, signal);
+    const response = data.response ?? data;
+    const docs: any[] = response.docs ?? [];
+
+    if (docs.length === 0) {
+        throw new Error(`Paper not found: ${id}`);
+    }
+
+    return {
+        bibcode: docs[0].bibcode ?? "",
+        title: Array.isArray(docs[0].title) ? docs[0].title.join(" ") : (docs[0].title ?? ""),
+    };
+}
+
+async function fetchPDF(
+    bibcode: string,
+    sourceKey: PDFSource,
+    signal?: AbortSignal
+): Promise<ArrayBuffer> {
+    const sourceParam = PDF_SOURCES[sourceKey];
+    const url = `${ADS_LINK_GATEWAY}/${encodeURIComponent(bibcode)}/${sourceParam}`;
+
+    // link_gateway is a public redirect service — no ADS token needed
+    const resp = await fetch(url, {
+        signal,
+        redirect: "follow",
+        headers: {
+            "User-Agent": PDF_UA,
+        },
+    });
+
+    if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status} ${resp.statusText} from ${sourceKey} source`);
+    }
+
+    const contentType = resp.headers.get("content-type") ?? "";
+
+    // Detect CAPTCHA pages
+    if (contentType.includes("text/html")) {
+        const body = await resp.text();
+        if (body.includes("CAPTCHA")) {
+            throw new Error(
+                `CAPTCHA detected from ${sourceKey} source. ` +
+                `Try a different source or download manually from ADS.`
+            );
+        }
+        throw new Error(
+            `Expected PDF but got HTML from ${sourceKey} source. ` +
+            `The paper may be behind a paywall. Try source='arxiv' for the arXiv version.`
+        );
+    }
+
+    if (!contentType.includes("application/pdf")) {
+        throw new Error(
+            `Unexpected Content-Type '${contentType}' from ${sourceKey} source. ` +
+            `The PDF may not be available from this source.`
+        );
+    }
+
+    return resp.arrayBuffer();
+}
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function bibcodeToFilename(bibcode: string): string {
+    // Replace each '.' with '_' — 1:1 reversible since bibcodes never contain '_'
+    // "2023ApJ...950L..12A" → "2023ApJ___950L__12A"
+    return bibcode.replace(/\./g, "_");
+}
+
+function filenameToBibcode(filename: string): string {
+    // Reverse of bibcodeToFilename: replace '_' → '.'
+    return filename.replace(/_/g, ".");
+}
+
+async function getPdfDownloadDir(): Promise<string | undefined> {
+    // Check settings.json for ads.pdfDownloadDir
+    const path = await import("path");
+    const fs = await import("fs/promises");
+    const homedir = (await import("os")).homedir();
+    const settingsPath = path.join(homedir, ".pi", "agent", "settings.json");
+    try {
+        const raw = await fs.readFile(settingsPath, "utf8");
+        const settings = JSON.parse(raw);
+        const dir = settings?.ads?.pdfDownloadDir;
+        if (typeof dir === "string" && dir.length > 0) {
+            // Expand ~ to home directory
+            return dir.replace(/^~/, homedir);
+        }
+    } catch {
+        // Settings file may not exist or be invalid — that's fine
+    }
+    return undefined;
+}
+
+// --- End shared helpers ---
+
 function buildSortParam(sortBy: string): string {
     const map: Record<string, string> = {
         relevance: "score desc",
@@ -324,16 +463,7 @@ export default function (pi: ExtensionAPI) {
             const id = params.id.trim();
 
             // Detect identifier type and build appropriate query
-            if (id.startsWith("10.") || id.startsWith("doi:")) {
-                const doi = id.replace(/^doi:/, "");
-                query = `doi:"${doi}"`;
-            } else if (id.toLowerCase().startsWith("arxiv:") || /^\d{4}\.\d{4,5}/.test(id)) {
-                const arxivId = id.replace(/^arxiv:/i, "");
-                query = `arxiv:"${arxivId}"`;
-            } else {
-                // Assume bibcode
-                query = `bibcode:${id}`;
-            }
+            query = buildIdQuery(id);
 
             const url =
                 `${ADS_SEARCH_API}?q=${encodeURIComponent(query)}` +
@@ -411,6 +541,200 @@ export default function (pi: ExtensionAPI) {
                 if (details.bibtex) {
                     text += "\n\n" + theme.fg("dim", "BibTeX available");
                 }
+            }
+
+            return new Text(text, 0, 0);
+        },
+    });
+
+    // --- ads_download_pdf tool ---
+
+    pi.registerTool({
+        name: "ads_download_pdf",
+        label: "ADS Download PDF",
+        description:
+            "Download the PDF of a paper from ADS, given a bibcode, DOI, or arXiv ID. " +
+            "The PDF is saved to a local file. Tries publisher → ADS → arXiv sources in fallback order. " +
+            "Requires ADS_API_TOKEN environment variable.",
+        promptSnippet:
+            "Download a paper's PDF from ADS by bibcode, DOI, or arXiv ID. Saves to a local file.",
+        parameters: Type.Object({
+            id: Type.String({
+                description:
+                    'Paper identifier: ADS bibcode (e.g. "2023ApJ...950L..12A"), ' +
+                    'DOI (e.g. "10.3847/2041-8213/acb7e0"), or arXiv ID (e.g. "arXiv:2301.01234").',
+            }),
+            output_path: Type.Optional(
+                Type.String({
+                    description:
+                        "File path to save the PDF. Defaults to ./{bibcode}.pdf in the current working directory. " +
+                        "If a directory path is given, saves as {dir}/{bibcode}.pdf.",
+                })
+            ),
+            source: Type.Optional(
+                StringEnum(["auto", "publisher", "ads", "arxiv"] as const, {
+                    description:
+                        "Preferred PDF source. 'auto' (default) tries publisher → ADS → arXiv fallback chain. " +
+                        "'publisher' = PUB_PDF, 'ads' = ADS_PDF, 'arxiv' = EPRINT_PDF.",
+                })
+            ),
+        }),
+
+        async execute(_toolCallId, params, signal) {
+            const sourceParam = params.source ?? "auto";
+
+            // Resolve identifier to bibcode
+            let resolved: ResolvedBibcode;
+            try {
+                resolved = await resolveBibcode(params.id, signal);
+            } catch (err: any) {
+                return {
+                    content: [{ type: "text", text: `Paper not found: ${params.id}` }],
+                    details: { bibcode: "", title: "", source: sourceParam as any, outputPath: "", fileSizeBytes: 0 },
+                    isError: true,
+                };
+            }
+
+            const { bibcode, title } = resolved;
+
+            // Determine output path
+            const path = await import("path");
+            const fs = await import("fs/promises");
+            const safeName = `${bibcodeToFilename(bibcode)}.pdf`;
+            let outputPath: string;
+            if (!params.output_path) {
+                // Check settings for default download dir, fall back to CWD
+                const downloadDir = await getPdfDownloadDir();
+                if (downloadDir) {
+                    outputPath = path.join(downloadDir, safeName);
+                } else {
+                    outputPath = path.join(process.cwd(), safeName);
+                }
+            } else if (params.output_path.endsWith("/") || !path.extname(params.output_path)) {
+                // Looks like a directory
+                outputPath = path.join(params.output_path, safeName);
+            } else {
+                outputPath = params.output_path;
+            }
+
+            // Check if file already exists
+            try {
+                await fs.access(outputPath);
+                const stat = await fs.stat(outputPath);
+                return {
+                    content: [{
+                        type: "text",
+                        text:
+                            `PDF already exists: ${outputPath}\n` +
+                            `  Bibcode: ${bibcode}\n` +
+                            `  Title: ${title}\n` +
+                            `  Size: ${formatFileSize(stat.size)}\n` +
+                            `  Modified: ${stat.mtime.toISOString()}\n\n` +
+                            `To re-download, delete the file first or specify a different output_path.`,
+                    }],
+                    details: {
+                        bibcode,
+                        title,
+                        source: "cached" as any,
+                        outputPath: path.resolve(outputPath),
+                        fileSizeBytes: stat.size,
+                    },
+                };
+            } catch {
+                // File doesn't exist — proceed with download
+            }
+
+            // Determine source order
+            const sourceOrder: PDFSource[] =
+                sourceParam === "auto"
+                    ? ["publisher", "ads", "arxiv"]
+                    : [sourceParam as PDFSource];
+
+            // Try each source
+            let pdfBuffer: ArrayBuffer | undefined;
+            let usedSource: PDFSource | undefined;
+            let lastError: string = "";
+
+            for (const src of sourceOrder) {
+                try {
+                    pdfBuffer = await fetchPDF(bibcode, src, signal);
+                    usedSource = src;
+                    break;
+                } catch (err: any) {
+                    lastError = err.message ?? String(err);
+                }
+            }
+
+            if (!pdfBuffer || !usedSource) {
+                const tried = sourceOrder.join(" → ");
+                return {
+                    content: [{
+                        type: "text",
+                        text:
+                            `Failed to download PDF for ${bibcode} (${title}).\n` +
+                            `Tried sources: ${tried}.\n` +
+                            `Last error: ${lastError}\n\n` +
+                            `You can try downloading manually: ${ADS_LINK_GATEWAY}/${bibcode}/EPRINT_PDF`,
+                    }],
+                    details: { bibcode, title, source: sourceParam as any, outputPath, fileSizeBytes: 0 },
+                    isError: true,
+                };
+            }
+
+            // Create parent directory and write file
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, Buffer.from(pdfBuffer));
+
+            const fileSize = pdfBuffer.byteLength;
+            const sourceLabel = { publisher: "publisher", ads: "ADS", arxiv: "arXiv" }[usedSource];
+
+            let text = `Downloaded PDF for: ${title}`;
+            text += `\n  Bibcode: ${bibcode}`;
+            text += `\n  Source: ${sourceLabel}`;
+            text += `\n  Saved to: ${outputPath}`;
+            text += `\n  Size: ${formatFileSize(fileSize)}`;
+
+            return {
+                content: [{ type: "text", text }],
+                details: {
+                    bibcode,
+                    title,
+                    source: usedSource,
+                    outputPath: path.resolve(outputPath),
+                    fileSizeBytes: fileSize,
+                },
+            };
+        },
+
+        renderCall(args, theme) {
+            let text = theme.fg("toolTitle", theme.bold("ads ↓"));
+            text += " " + theme.fg("accent", args.id);
+            if (args.source && args.source !== "auto") {
+                text += theme.fg("dim", ` src:${args.source}`);
+            }
+            return new Text(text, 0, 0);
+        },
+
+        renderResult(result, { expanded }, theme) {
+            if (result.isError) {
+                return new Text(theme.fg("error", "PDF download failed"), 0, 0);
+            }
+
+            const details = result.details as {
+                bibcode: string;
+                title: string;
+                source: string;
+                outputPath: string;
+                fileSizeBytes: number;
+            };
+
+            const sourceLabel = { publisher: "publisher", ads: "ADS", arxiv: "arXiv" }[details.source] ?? details.source;
+            let text = theme.fg("success", `✓ ${formatFileSize(details.fileSizeBytes)}`);
+            text += theme.fg("dim", ` from ${sourceLabel}`);
+
+            if (expanded) {
+                text += "\n" + theme.fg("accent", theme.bold(details.title));
+                text += "\n" + theme.fg("dim", `${details.bibcode} · saved to ${details.outputPath}`);
             }
 
             return new Text(text, 0, 0);

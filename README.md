@@ -80,6 +80,46 @@ Look up a paper by its ADS bibcode, DOI, or arXiv ID.
 - *"Find the ADS entry for DOI 10.3847/2041-8213/acb7e0"*
 - *"Fetch arxiv paper 2301.01234 from ADS"*
 
+### `ads_download_pdf` — Download a paper's PDF
+
+Download the PDF of a paper from ADS. Tries publisher → ADS → arXiv sources in fallback order.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | string | **Required.** ADS bibcode, DOI, or arXiv ID (same resolution as `ads_paper`). |
+| `output_path` | string | File path to save the PDF. Defaults to `{pdfDownloadDir}/{safeName}.pdf` (see config below). If a directory is given, saves as `{dir}/{safeName}.pdf`. |
+| `source` | string | Preferred PDF source: `auto` (default, tries publisher → ADS → arXiv), `publisher` (PUB_PDF), `ads` (ADS_PDF), or `arxiv` (EPRINT_PDF). |
+
+**Example prompts:**
+- *"Download the PDF for bibcode 2023ApJ...950L..12A"*
+- *"Download the PDF for arxiv 2301.01234 and save it to ~/papers/"*
+- *"Get the PDF for DOI 10.3847/2041-8213/acb7e0 from arxiv"*
+
+**PDF sources:**
+- **Publisher** (`PUB_PDF`): Direct from the journal. May be behind a paywall.
+- **ADS** (`ADS_PDF`): ADS-hosted scan. Available for many older papers.
+- **arXiv** (`EPRINT_PDF`): arXiv preprint. Usually open access but may differ from published version.
+
+**Behavior notes:**
+- If the file already exists, the download is skipped and the existing file path is returned.
+- Bibcode dots are replaced 1:1 with underscores in filenames: `2023ApJ...950L..12A` → `2023ApJ___950L__12A.pdf`. Since bibcodes never contain underscores, this is fully reversible.
+
+#### Default download directory
+
+Add to `~/.pi/agent/settings.json` to configure a default download folder:
+
+```json
+{
+  "ads": {
+    "pdfDownloadDir": "~/papers"
+  }
+}
+```
+
+When set, PDFs are saved to `~/papers/2023ApJ_950L_12A.pdf` by default. Without this setting, the current working directory is used.
+
 ### `ads_citations` — Explore citation graphs
 
 Find papers that cite a given paper (forward citations) or that a given paper cites (backward references).
