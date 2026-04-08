@@ -257,6 +257,12 @@ function filenameToBibcode(filename: string): string {
     return filename.replace(/_/g, ".");
 }
 
+function isBibcode(id: string): boolean {
+    // ADS bibcodes are exactly 19 characters: YYYY + 5-char journal + volume/page/author suffix
+    // e.g. "2023ApJ...950L..12A"
+    return /^\d{4}.{15}$/.test(id);
+}
+
 async function getPdfDownloadDir(): Promise<string | undefined> {
     // Check settings.json for ads.pdfDownloadDir
     const path = await import("path");
@@ -582,8 +588,48 @@ export default function (pi: ExtensionAPI) {
 
         async execute(_toolCallId, params, signal) {
             const sourceParam = params.source ?? "auto";
+            const path = await import("path");
+            const fs = await import("fs/promises");
+            const homedir = (await import("os")).homedir();
 
-            // Resolve identifier to bibcode
+            // --- Fast path: local-only check for bibcodes (no ADS API call) ---
+            const trimmedId = params.id.trim();
+            const idIsBibcode = isBibcode(trimmedId);
+
+            // Determine download dir early so we can try the fast path
+            const downloadDir = await getPdfDownloadDir();
+
+            if (!params.output_path && idIsBibcode) {
+                const candidatePath = downloadDir
+                    ? path.join(downloadDir, `${bibcodeToFilename(trimmedId)}.pdf`)
+                    : path.join(process.cwd(), `${bibcodeToFilename(trimmedId)}.pdf`);
+
+                try {
+                    const stat = await fs.stat(candidatePath);
+                    return {
+                        content: [{
+                            type: "text",
+                            text:
+                                `PDF already exists: ${candidatePath}\n` +
+                                `  Bibcode: ${trimmedId}\n` +
+                                `  Size: ${formatFileSize(stat.size)}\n` +
+                                `  Modified: ${stat.mtime.toISOString()}\n\n` +
+                                `To re-download, delete the file first or specify a different output_path.`,
+                        }],
+                        details: {
+                            bibcode: trimmedId,
+                            title: "(not fetched — cached)",
+                            source: "cached" as any,
+                            outputPath: path.resolve(candidatePath),
+                            fileSizeBytes: stat.size,
+                        },
+                    };
+                } catch {
+                    // File doesn't exist locally — fall through to full download path
+                }
+            }
+
+            // --- Full path: resolve ID via ADS API, then download ---
             let resolved: ResolvedBibcode;
             try {
                 resolved = await resolveBibcode(params.id, signal);
@@ -598,13 +644,9 @@ export default function (pi: ExtensionAPI) {
             const { bibcode, title } = resolved;
 
             // Determine output path
-            const path = await import("path");
-            const fs = await import("fs/promises");
             const safeName = `${bibcodeToFilename(bibcode)}.pdf`;
             let outputPath: string;
             if (!params.output_path) {
-                // Check settings for default download dir, fall back to CWD
-                const downloadDir = await getPdfDownloadDir();
                 if (downloadDir) {
                     outputPath = path.join(downloadDir, safeName);
                 } else {
@@ -617,9 +659,8 @@ export default function (pi: ExtensionAPI) {
                 outputPath = params.output_path;
             }
 
-            // Check if file already exists
+            // Check if file already exists (post-resolution path)
             try {
-                await fs.access(outputPath);
                 const stat = await fs.stat(outputPath);
                 return {
                     content: [{
