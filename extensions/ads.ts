@@ -312,10 +312,13 @@ export default function (pi: ExtensionAPI) {
             "Search NASA's Astrophysics Data System (ADS) for astronomy and physics papers. " +
             "Supports fielded queries (title:, author:, abstract:, keyword:, year:, bibcode:, doi:, etc.), " +
             "database filters (astronomy, physics, general), and sorting by relevance, date, or citation count. " +
+            "IMPORTANT: The tool parameters only cover basic fields. For full ADS query syntax " +
+            "(entdate, arxiv_class, doctype, property, object, citation operators, wildcards, etc.), " +
+            "load the 'ads' skill first. " +
             "Use detail='compact' (default) for concise summaries, or detail='full' to include abstracts, all authors, and keywords. " +
             "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
-            "Search NASA ADS for astronomy/physics papers. Supports fielded queries, database filters, and sorting. " +
+            "Search NASA ADS for astronomy/physics papers. Load the 'ads' skill for full query syntax (entdate, arxiv_class, etc.). " +
             "Returns compact summaries by default. Use detail='full' for abstracts.",
         parameters: Type.Object({
             query: Type.String({
@@ -459,6 +462,7 @@ export default function (pi: ExtensionAPI) {
             "Fetch details of a specific paper from NASA's ADS by bibcode, DOI, or arXiv ID. " +
             "Accepts ADS bibcodes like '2023ApJ...950L..12A', DOIs like '10.3847/2041-8213/acb7e0', " +
             "or arXiv IDs like 'arXiv:2301.01234'. Optionally returns BibTeX for citation. " +
+            "For complex ADS queries, load the 'ads' skill for full syntax reference. " +
             "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
             "Fetch a specific ADS paper by bibcode, DOI, or arXiv ID. Optionally returns BibTeX.",
@@ -570,6 +574,7 @@ export default function (pi: ExtensionAPI) {
         description:
             "Download the PDF of a paper from ADS, given a bibcode, DOI, or arXiv ID. " +
             "The PDF is saved to a local file. Tries publisher → ADS → arXiv sources in fallback order. " +
+            "For complex ADS queries, load the 'ads' skill for full syntax reference. " +
             "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
             "Download a paper's PDF from ADS by bibcode, DOI, or arXiv ID. Saves to a local file.",
@@ -797,6 +802,7 @@ export default function (pi: ExtensionAPI) {
         description:
             "Find papers that cite a given paper (citations) or that a given paper cites (references). " +
             "Uses ADS bibcode identifiers. " +
+            "For complex ADS queries, load the 'ads' skill for full syntax reference. " +
             "Use detail='compact' (default) for concise summaries, or detail='full' to include abstracts, all authors, and keywords. " +
             "Requires ADS_API_TOKEN environment variable.",
         promptSnippet:
