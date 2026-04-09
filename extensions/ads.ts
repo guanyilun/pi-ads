@@ -83,12 +83,21 @@ function parseDoc(doc: any): ADSPaper {
     };
 }
 
+function truncateAuthors(authors: string[], maxAuthors: number = 10): string {
+    if (authors.length <= maxAuthors) {
+        return authors.join("; ");
+    }
+    const shown = authors.slice(0, maxAuthors).join("; ");
+    const remaining = authors.length - maxAuthors;
+    return `${shown}; ... +${remaining} more`;
+}
+
 function formatPaper(p: ADSPaper, index?: number): string {
     const prefix = index !== undefined ? `[${index + 1}] ` : "";
     const lines: string[] = [
         `${prefix}${p.title}`,
         `    Bibcode: ${p.bibcode}`,
-        `    Authors: ${p.authors.join("; ")}`,
+        `    Authors: ${truncateAuthors(p.authors)}`,
         `    Published: ${p.pubdate}  Year: ${p.year}`,
         `    Journal: ${p.pub}`,
     ];
@@ -530,7 +539,7 @@ export default function (pi: ExtensionAPI) {
             const p = details.paper;
             let text = theme.fg("accent", theme.bold(p.title));
             text += "\n" + theme.fg("dim", `${p.bibcode} · ${p.pubdate}`);
-            text += "\n" + theme.fg("muted", p.authors.join("; "));
+            text += "\n" + theme.fg("muted", truncateAuthors(p.authors));
             text += "\n" + theme.fg("muted", `${p.pub}`);
             text += " " + theme.fg("success", `${p.citationCount} cit`);
 
